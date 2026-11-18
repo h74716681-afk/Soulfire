@@ -1,0 +1,961 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SOULFIRE ESPORTS</title>
+<style>
+:root{
+ --bg:#090b10;--panel:#151922;--line:#303847;
+ --purple:#8e5bdb;--gold:#e9bd62;--muted:#aab2c0;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:white;font-family:Arial, sans-serif}
+header{
+ position:sticky;top:0;z-index:20;background:#090b10ed;
+ border-bottom:1px solid #28303d;padding:10px 4%;
+ display:flex;align-items:center;justify-content:space-between;gap:10px;
+}
+.brand{font-weight:1000;letter-spacing:1.5px;font-size:14px}
+.brand span{color:var(--gold)}
+nav{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+nav button,.tab-btn{
+ border:1px solid #424b5a;background:#171d27;color:white;
+ border-radius:8px;padding:8px 11px;font-size:12px;font-weight:bold;
+ cursor:pointer;
+}
+nav button.active,.tab-btn.active{background:#6843a1;border-color:#a986dc}
+.page{display:none;max-width:1120px;margin:auto;padding:26px 4% 55px}
+.page.active{display:block}
+#homePage{max-width:none;padding:0}
+.home-scene{
+ position:relative;min-height:calc(100vh - 55px);
+ overflow:hidden;background:#18251d;
+}
+.home-scene video{
+ position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+}
+.scene-shade{
+ position:absolute;inset:0;
+ background:linear-gradient(90deg,#07110bb8,#07110b55 55%,#07110b9c);
+}
+.home-content{
+ position:relative;z-index:2;min-height:calc(100vh - 55px);
+ display:grid;grid-template-columns:1fr minmax(260px,390px);
+ gap:28px;align-items:center;padding:clamp(25px,6vw,80px);
+}
+.home-title img{
+ width:100px;height:100px;border-radius:50%;object-fit:cover;
+ border:2px solid #ffffffa8;
+}
+.home-title h1{
+ font-size:clamp(32px,6vw,68px);line-height:1.02;
+ margin:18px 0 8px;text-shadow:0 2px 15px #000;
+}
+.home-title p{letter-spacing:2px;font-weight:800;text-shadow:0 2px 10px #000}
+.rules-card{
+ height:min(64vh,480px);min-height:300px;
+ background:#070b0bd1;border:1px solid #ffffff55;
+ border-radius:15px;padding:18px 20px;overflow:hidden;
+ backdrop-filter:blur(5px);
+}
+.rules-card h2{
+ text-align:center;margin:0 0 10px;color:#f1d18e;
+ letter-spacing:2px;font-size:18px;
+}
+.credits-window{height:calc(100% - 35px);overflow:hidden}
+.credits-roll{
+ animation:credits 42s linear infinite;
+ text-align:center;padding-top:100%;
+}
+.credits-roll h3{font-size:17px;margin:24px 0 8px}
+.credits-roll p{color:#e2e7df;line-height:1.65;margin:8px 0}
+@keyframes credits{
+ from{transform:translateY(0)}
+ to{transform:translateY(-100%)}
+}
+.rules-card:hover .credits-roll{animation-play-state:paused}
+.section-title{font-size:25px;margin:0 0 18px}
+.muted{color:var(--muted)}
+.grid{
+ display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+ gap:14px;
+}
+.card{
+ background:linear-gradient(145deg,#171e29,#10151d);
+ border:1px solid var(--line);border-radius:13px;padding:17px;
+}
+.gc-card{
+ min-height:128px;display:flex;flex-direction:column;
+ justify-content:space-between;cursor:pointer;color:white;text-align:left;
+}
+.gc-card:hover{border-color:#a986dc;transform:translateY(-2px)}
+.gc-card{background-size:cover;background-position:center;min-height:170px;position:relative;overflow:hidden;text-shadow:0 2px 8px #000}
+.gc-card:before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,#080b10e8,#080b1066);pointer-events:none}
+.gc-card>*{position:relative;z-index:1}
+.category-avatar{width:58px;height:58px;display:block;object-fit:cover;border-radius:50%;border:2px solid #ffffffaa;flex-shrink:0}
+.category-banner{min-height:190px;border:1px solid #ffffff33;border-radius:16px;background-size:cover;background-position:center;margin:12px 0 18px;display:flex;align-items:end;padding:18px;box-shadow:inset 0 -90px 80px #05070bc9}
+.category-banner h2{margin:0;font-size:clamp(22px,4vw,36px);text-shadow:0 2px 8px #000}
+.result-player{display:grid;grid-template-columns:minmax(0,1fr) minmax(120px,180px);gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid #303847}
+.result-editor{margin-top:12px;padding:12px;border:1px solid #465366;border-radius:10px;background:#0e131b}
+.category-avatar{width:42px;height:42px;display:grid;place-items:center;border-radius:50%;background:#29213a;border:1px solid #a986dc;font-size:23px;flex-shrink:0}
+.gc-card h3{margin:7px 0;font-size:17px}
+.gc-card small{color:var(--gold);font-weight:800;letter-spacing:1px}
+.btn{
+ background:#6944a0;border:1px solid #a986dc;border-radius:8px;
+ color:white;padding:10px 14px;font-weight:800;cursor:pointer;
+}
+.btn.secondary{background:#202835;border-color:#465366}
+.tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin:15px 0 18px}
+.tournament{margin-bottom:12px}
+.slot-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(42px,1fr));gap:6px;margin:10px 0}
+.slot-chip{padding:7px 4px;border-radius:7px;text-align:center;background:#202835;border:1px solid #465366;font-size:12px}
+.slot-chip.taken{opacity:.35;text-decoration:line-through}
+.wallet-row{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid #303847;font-size:13px}
+.notice-small{font-size:12px;color:#d8c18b;line-height:1.5}
+.tournament h3{margin:6px 0}
+.tag{
+ display:inline-block;background:#29213a;color:#e3caff;
+ padding:4px 8px;border-radius:20px;font-size:11px;
+}
+input,select,textarea{
+ width:100%;padding:11px;margin:6px 0 12px;
+ border:1px solid #465366;border-radius:8px;
+ background:#0c1119;color:white;
+}
+label{font-size:13px;color:#d5dbe5}
+.count{font-size:19px;color:var(--gold);font-weight:900}
+#notice{
+ position:fixed;bottom:14px;left:5%;right:5%;padding:12px;
+ background:#202a38;border:1px solid #77869b;
+ border-radius:9px;display:none;z-index:40;
+}
+footer{text-align:center;padding:22px;color:#9ba5b5;border-top:1px solid #28303d}
+.community-float{position:fixed;right:18px;bottom:22px;z-index:9999;width:60px;height:60px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#25D366;color:#fff;text-decoration:none;font-size:29px;font-weight:900;box-shadow:0 5px 22px #0009;border:2px solid #baf5cf}
+.community-float:active{transform:scale(.94)}
+.community-float span{position:absolute;right:68px;background:#151922;color:#fff;border:1px solid #3c4656;border-radius:9px;padding:8px 11px;font-size:12px;white-space:nowrap}
+@media(max-width:720px){
+ header{align-items:center}
+ .brand{font-size:12px}
+ nav{gap:5px}
+ nav button{padding:7px 8px;font-size:11px}
+ .home-content{grid-template-columns:1fr;align-content:center;gap:18px}
+ .home-title img{width:72px;height:72px}
+ .rules-card{height:36vh;min-height:220px}
+ .tabs{grid-template-columns:repeat(2,1fr)}
+}
+@media(prefers-reduced-motion:reduce){
+ .credits-roll{animation:none;transform:none}
+}
+</style>
+</head>
+<body>
+
+<header>
+ <div class="brand">SOULFIRE <span>ESPORTS</span></div>
+ <nav>
+  <button data-page="matchesPage">Matches</button>
+  <button data-page="accountPage">Account / Wallet</button>
+  <button data-page="leaderboardPage">Leaderboard</button>
+  <button data-page="organizerPage">Organizer</button>
+ </nav>
+</header>
+
+<main>
+
+<!-- HOME PAGE -->
+<section class="page active" id="homePage">
+ <div class="home-scene">
+  <video id="natureVideo" autoplay muted loop playsinline poster="/logo.jpg">
+   <source src="/nature.mp4" type="video/mp4">
+  </video>
+  <div class="scene-shade"></div>
+
+  <div class="home-content">
+   <div class="home-title">
+    <img src="/logo.jpg" alt="SOULFIRE logo">
+    <h1>SOULFIRE<br>ESPORTS</h1>
+    <p>COMPETE. DOMINATE. CONQUER.</p>
+   </div>
+
+   <div class="rules-card">
+    <h2>TOURNAMENT RULES</h2>
+    <div class="credits-window">
+     <div class="credits-roll">
+
+      <h3>WELCOME TO SOULFIRE ESPORTS</h3>
+      <p>Compete with respect. Play fair. Give every opponent a fair match.</p>
+
+      <h3>1 · FAIR PLAY</h3>
+      <p>No hacks, cheats, scripts, teaming or unfair gameplay.</p>
+
+      <h3>2 · RESPECT</h3>
+      <p>Do not abuse, threaten or harass other players or organizers.</p>
+
+      <h3>3 · MATCH TIME</h3>
+      <p>Join your scheduled room on time and follow organizer instructions.</p>
+
+      <h3>4 · PROOF</h3>
+      <p>Share clear screenshots or recordings when an organizer requests match proof.</p>
+
+      <h3>5 · DECISIONS</h3>
+      <p>Handle match disputes respectfully. Report issues with evidence.</p>
+
+      <h3>6 · REGISTRATION</h3>
+      <p>Register only when registration is open. Never share your account password.</p>
+
+      <h3>THANK YOU</h3>
+      <p>SOULFIRE ESPORTS</p>
+      <p>COMPETE. DOMINATE. CONQUER.</p>
+
+     </div>
+    </div>
+   </div>
+  </div>
+ </div>
+</section>
+
+<!-- MATCHES PAGE -->
+<section class="page" id="matchesPage">
+ <h2 class="section-title">MATCH CATEGORIES</h2>
+ <div class="card" style="margin-bottom:14px"><h3>📢 Announcements</h3><div id="announcements" class="muted">Loading announcements…</div></div>
+ <p class="muted">Choose your group to see its tournaments.</p>
+ <div id="gcGrid" class="grid"></div>
+</section>
+
+<!-- SELECTED GC PAGE -->
+<section class="page" id="categoryPage">
+ <button class="btn secondary" id="backToGroups">← All categories</button>
+ <h2 class="section-title" id="categoryTitle">Category</h2>
+ <div class="category-banner" id="categoryHero"><h2 id="categoryHeroTitle">SOULFIRE CATEGORY</h2></div>
+
+ <div class="tabs">
+  <button class="tab-btn active" data-status="upcoming">Scheduled</button>
+  <button class="tab-btn" data-status="ongoing">Ongoing</button>
+  <button class="tab-btn" data-status="results_pending">Results Pending</button>
+  <button class="tab-btn" data-status="completed">Completed</button>
+ </div>
+
+ <div id="categoryTournaments"></div>
+</section>
+
+<!-- ACCOUNT PAGE -->
+<section class="page" id="accountPage">
+ <h2 class="section-title">PLAYER ACCOUNT</h2>
+
+ <div class="grid">
+  <div class="card">
+   <h3>Create Account</h3>
+   <form id="signup">
+    <label>Player name</label>
+    <input name="name" required>
+
+    <label>Email</label>
+    <input name="email" type="email" required>
+
+    <label>Free Fire UID</label>
+    <input name="ff_uid" required>
+
+    <label>Password (8+ characters)</label>
+    <input name="password" type="password" minlength="8" required>
+
+    <button class="btn">Create account</button>
+   </form>
+  </div>
+
+  <div class="card">
+   <h3>Player Login</h3>
+   <form id="login">
+    <label>Email</label>
+    <input name="email" type="email" required>
+
+    <label>Password</label>
+    <input name="password" type="password" required>
+
+    <button class="btn">Login</button>
+   </form>
+
+   <hr>
+   <div id="profile" class="muted">
+    Login to view your profile and SOUL COINS.
+   </div>
+
+   <button class="btn secondary" onclick="logout()">Logout</button>
+  </div>
+ </div>
+
+ <div class="grid" style="margin-top:14px">
+  <div class="card">
+   <h3>My Entries</h3>
+   <div id="myEntries" class="muted">Login to view your entries.</div>
+  </div>
+  <div class="card">
+   <h3>SOUL COINS History</h3>
+   <div id="walletHistory" class="muted">Login to view coin history.</div>
+  </div>
+ </div>
+ <div class="grid" style="margin-top:14px">
+  <div class="card"><h3>Buy SOUL COINS</h3><p>Need more coins? Contact SOULFIRE admin on WhatsApp. Admin will verify any payment separately and update your virtual wallet.</p><div id="buyCoinsContact" class="muted">WhatsApp contact will appear here when configured.</div></div>
+  <div class="card"><h3>Withdraw SOUL COINS</h3><p>Withdrawal requests: contact the SOULFIRE admin on WhatsApp. Cash payouts remain disabled until legal and payment-provider approval.</p><div id="withdrawCoinsContact" class="muted">WhatsApp contact loading...</div></div>
+ </div>
+ <div class="card" style="margin-top:14px"><h3>Wallet requests</h3><div id="walletRequests" class="muted">Login to view wallet history.</div></div>
+ <p class="notice-small">SOUL COINS are virtual wallet points in this build. Real-money purchases, paid-entry staking, cash prizes and cash withdrawals are disabled until the exact model has written legal and provider approval.</p>
+</section>
+
+<!-- LEADERBOARD PAGE -->
+<section class="page" id="leaderboardPage">
+ <h2 class="section-title">LEADERBOARD</h2>
+ <div class="card" id="leaders">Loading leaderboard...</div>
+</section>
+
+<!-- ORGANIZER PAGE -->
+<section class="page" id="organizerPage">
+ <h2 class="section-title">ORGANIZER CONTROL</h2>
+
+ <div id="organizerLock" class="card">
+  <p class="muted">Organizer tools are protected by your private organizer key.</p>
+  <label>Organizer key</label>
+  <input id="admin-key" type="password" autocomplete="off">
+  <button class="btn" id="unlockOrganizer">Unlock organizer panel</button>
+ </div>
+
+ <div id="organizerTools" hidden>
+
+  <div class="card">
+   <h3>Schedule a tournament</h3>
+   <form id="create-tournament">
+
+    <label>Tournament name</label>
+    <input name="name" required>
+
+    <label>GC category</label>
+    <select name="gc" id="gcSelect" required></select>
+
+    <label>Mode</label>
+    <select name="mode">
+     <option>Auto from category</option>
+    </select>
+
+    <label>Entry fee (virtual SOUL COINS per player)</label>
+    <input name="entry_coins" id="entryCoinsInput" type="number" min="0" max="100000" value="10" required>
+    <div id="autoPrizePreview" class="notice-small">Choose category and entry fee to preview automatic rewards.</div>
+
+    <label>Match date and time</label>
+    <input name="match_time" type="datetime-local" required>
+
+    <label>Maximum players (automatic from category)</label>
+    <input name="max_players" type="number" min="1" value="48" disabled>
+
+    <label>Details</label>
+    <textarea name="details" rows="2"></textarea>
+
+    <button class="btn">Schedule tournament</button>
+   </form>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+   <h3>Manage tournaments</h3>
+   <label>Category control panel</label><select id="adminCategoryFilter"><option value="">All categories</option></select>
+   <div id="adminTournamentList">Loading...</div>
+  </div>
+  <div class="card" style="margin-top:14px"><h3>Match Result Editor</h3><p class="notice-small">Only organizer can see and submit results. Select every player's result before submit appears.</p><div id="adminResultEditors">Open a match from Manage tournaments.</div></div>
+
+  <div class="card" style="margin-top:14px">
+   <h3>Registered players</h3>
+   <button class="btn secondary" id="refreshRegistrations">Refresh registrations</button>
+   <div id="adminRegistrations" style="margin-top:12px">Unlock organizer panel to view.</div>
+  </div>
+
+  <div class="grid" style="margin-top:14px">
+
+   <div class="card">
+    <h3>Award virtual SOUL COINS</h3>
+    <form id="award">
+     <label>Player Free Fire UID</label>
+     <input name="ff_uid" required>
+
+     <label>Amount</label>
+     <input name="amount" type="number" min="1" max="10000" required>
+
+     <label>Reason</label>
+     <input name="reason" required>
+
+     <button class="btn">Award coins</button>
+    </form>
+   </div>
+
+   <div class="card"><h3>Result workflow</h3><p>Use Match Result Editor above. It loads every registered player's name and only enables Submit after every result is selected.</p></div>
+
+  </div>
+
+  <div class="card" style="margin-top:14px"><h3>Find player & manage wallet</h3><input id="playerSearch" placeholder="Search by Gmail, Player ID, name or Free Fire UID"><button class="btn secondary" id="searchPlayersBtn" type="button">Search players</button><div id="playerSearchResults" style="margin-top:10px"></div></div>
+  <div class="grid" style="margin-top:14px"><div class="card"><h3>Publish announcement</h3><form id="announcementForm"><label>Title</label><input name="title" required><label>Message</label><textarea name="body" rows="3" required></textarea><button class="btn">Publish</button></form></div><div class="card"><h3>Player management</h3><button class="btn secondary" id="refreshPlayers">Refresh players</button><div id="adminPlayers" style="margin-top:10px"></div></div></div>
+  <button class="btn secondary" id="lockOrganizer" style="margin-top:14px">
+   Lock organizer panel
+  </button>
+ </div>
+</section>
+
+</main>
+
+<footer>©️ 2026 SOULFIRE ESPORTS · COMPETE. DOMINATE. CONQUER.</footer>
+<div id="notice" role="status"></div>
+
+<script>
+let token = localStorage.getItem('sf_token') || '';
+let selectedGC = '';
+let selectedStatus = 'upcoming';
+let adminKey = '';
+
+const $ = s => document.querySelector(s);
+
+const GCS = [
+ 'BR Full Map',
+ 'LW 1v1 Body',
+ 'LW 2v2 Body',
+ 'LW 1v1 Head',
+ 'LW 2v2 Head',
+ 'CS 1v1 Body',
+ 'CS 2v2 Body',
+ 'CS 3v3 Body',
+ 'CS 4v4 Body',
+ 'CS 1v1 Head',
+ 'CS 2v2 Head',
+ 'CS 3v3 Head',
+ 'CS 4v4 Head'
+];
+
+function msg(text) {
+ const n = $('#notice');
+ n.textContent = text;
+ n.style.display = 'block';
+ setTimeout(() => n.style.display = 'none', 3500);
+}
+
+function showPage(id) {
+ document.querySelectorAll('.page').forEach(p => {
+  p.classList.toggle('active', p.id === id);
+ });
+ window.scrollTo({top:0, behavior:'smooth'});
+}
+
+document.querySelectorAll('nav button').forEach(button => {
+ button.addEventListener('click', () => showPage(button.dataset.page));
+});
+
+async function api(url, options = {}) {
+ const headers = {
+  'Content-Type':'application/json',
+  ...(options.headers || {})
+ };
+
+ if (token) headers.Authorization = 'Bearer ' + token;
+
+ const response = await fetch('/api' + url, {
+  ...options,
+  headers
+ });
+
+ const data = await response.json();
+
+ if (!response.ok) {
+  throw Error(data.error || 'Request failed');
+ }
+
+ return data;
+}
+
+function escapeHtml(value) {
+ return String(value ?? '').replace(/[&<>"']/g, char => ({
+  '&':'&amp;',
+  '<':'&lt;',
+  '>':'&gt;',
+  '"':'&quot;',
+  "'":'&#39;'
+ }[char]));
+}
+
+// Every category has its own wallpaper and matching profile-picture emblem.
+function categoryIndex(gc) { return Math.max(0,GCS.indexOf(gc))+1; }
+function categoryWallpaper(gc) { return `/categories/wallpaper-${String(categoryIndex(gc)).padStart(2,'0')}.svg`; }
+function categoryAvatar(gc) { return `/categories/avatar-${String(categoryIndex(gc)).padStart(2,'0')}.svg`; }
+function renderGCs() {
+ $('#gcGrid').innerHTML = GCS.map((gc, i) => `
+  <button class="card gc-card" data-gc="${escapeHtml(gc)}" style="background-image:url('${categoryWallpaper(gc)}')">
+   <small>SOULFIRE CATEGORY ${String(i+1).padStart(2,'0')}</small>
+   <div style="display:flex;align-items:center;gap:10px"><img class="category-avatar" src="${categoryAvatar(gc)}" alt="${escapeHtml(gc)} avatar"><h3>${escapeHtml(gc)}</h3></div>
+   <span>Open tournaments →</span>
+  </button>
+ `).join('');
+
+ document.querySelectorAll('[data-gc]').forEach(button => {
+  button.addEventListener('click', () => openGC(button.dataset.gc));
+ });
+}
+
+async function openGC(gc) {
+ selectedGC = gc;
+ selectedStatus = 'upcoming';
+
+ $('#categoryTitle').textContent = gc;
+ $('#categoryHeroTitle').textContent = gc;
+ $('#categoryHero').style.backgroundImage = `url('${categoryWallpaper(gc)}')`;
+
+ document.querySelectorAll('.tab-btn').forEach(button => {
+  button.classList.toggle(
+   'active',
+   button.dataset.status === selectedStatus
+  );
+ });
+
+ showPage('categoryPage');
+ await loadCategory();
+}
+
+$('#backToGroups').onclick = () => showPage('matchesPage');
+
+document.querySelectorAll('.tab-btn').forEach(button => {
+ button.onclick = async () => {
+  selectedStatus = button.dataset.status;
+
+  document.querySelectorAll('.tab-btn').forEach(b => {
+   b.classList.toggle('active', b === button);
+  });
+
+  await loadCategory();
+ };
+});
+
+function statusLabel(status) {
+ return ({
+  upcoming:'Scheduled',
+  ongoing:'Ongoing',
+  results_pending:'Results Pending',
+  completed:'Completed'
+ })[status] || status;
+}
+
+// Only show tournaments belonging to selected GC
+async function loadCategory() {
+ try {
+  const tournaments = await api(
+   '/tournaments?gc=' + encodeURIComponent(selectedGC) +
+   '&status=' + encodeURIComponent(selectedStatus)
+  );
+
+  if (!tournaments.length) {
+   $('#categoryTournaments').innerHTML = `
+    <div class="card muted">
+     No ${statusLabel(selectedStatus).toLowerCase()}
+     tournaments in this category yet.
+    </div>`;
+   return;
+  }
+
+  const cards = await Promise.all(tournaments.map(async t => {
+   let slotUI = '';
+   if (t.gc === 'BR Full Map' && t.status === 'upcoming' && t.registration_open) {
+    try {
+     const slots = await api('/tournaments/' + t.id + '/slots');
+     slotUI = `<label>Choose your position</label><select id="slot-${t.id}">
+       <option value="">Select available position</option>
+       ${slots.available.map(n => `<option value="${n}">Position ${n}</option>`).join('')}
+      </select><p class="muted">${slots.booked.length} / ${slots.max_players} positions booked</p>`;
+    } catch (e) { slotUI = `<p class="muted">Slot list unavailable: ${escapeHtml(e.message)}</p>`; }
+   }
+   let publicResults = '';
+   if (t.status === 'completed') { try { const rr=await api('/tournaments/'+t.id+'/results'); publicResults = `<div class=\"wallet-row\"><b>Final results</b></div>` + rr.results.map(x=>`<div class=\"wallet-row\"><span>${escapeHtml(x.name)}${rr.gc==='BR Full Map'?` · ${x.kills} kills`:` · ${x.outcome.toUpperCase()}`}</span><b>+${x.reward_coins} coins</b></div>`).join(''); } catch(e) {} }
+   const teamUI = /2v2|3v3|4v4/i.test(t.gc) && t.status === 'upcoming' && t.registration_open
+    ? `<label>Team name (optional)</label><input id="team-${t.id}" maxlength="80" placeholder="Your team name"><label>Team member names (comma separated)</label><input id="members-${t.id}" maxlength="500" placeholder="Player 2, Player 3...">`
+    : '';
+   return `<article class="card tournament">
+    <span class="tag">${statusLabel(t.status)}</span>
+    <h3>${escapeHtml(t.name)}</h3>
+    <p>${escapeHtml(t.mode)} · Entry: ${t.entry_coins} SOUL COINS</p>
+    ${t.gc === 'BR Full Map' ? `<p>Per Kill: ${t.per_kill_coins} coins · Max Prize: ${t.max_prize_coins} coins</p>` : `<p>Winning Prize: ${t.prize_coins} coins per winning player</p>`}
+    <p>🗓 ${new Date(t.match_time).toLocaleString()}</p>
+    <p>${escapeHtml(t.details || '')}</p>
+    <p class="muted">Tournament ID: ${t.id} · Max players: ${t.max_players}</p>
+    ${publicResults}
+    ${slotUI}${teamUI}
+    ${t.status === 'upcoming' && t.registration_open
+      ? `<button class="btn" onclick="joinTournament(${t.id})">REGISTER</button>`
+      : '<span class="muted">Registration unavailable</span>'}
+   </article>`;
+  }));
+  $('#categoryTournaments').innerHTML = cards.join('');
+ } catch(error) { msg(error.message); }
+}
+async function joinTournament(id) {
+ try {
+  const body = {};
+  const slot = document.getElementById('slot-' + id);
+  if (slot) {
+   if (!slot.value) throw Error('Please choose an available position first.');
+   body.position = Number(slot.value);
+  }
+  const team = document.getElementById('team-' + id);
+  const members = document.getElementById('members-' + id);
+  if (team) body.team_name = team.value.trim();
+  if (members) body.member_names = members.value.trim();
+  if (!confirm('Confirm tournament registration? Entry coins will be deducted if registration succeeds.')) return;
+  const result = await api('/tournaments/' + id + '/join', {
+   method:'POST', body:JSON.stringify(body)
+  });
+  msg(result.message + (result.position ? ' Position: ' + result.position : ''));
+  await loadProfile(); await loadWalletHistory(); await loadMyEntries(); await loadCategory();
+ } catch(error) { msg(error.message); }
+}
+// Signup and login
+async function authForm(form, url) {
+ const data = Object.fromEntries(new FormData(form));
+
+ const result = await api(url, {
+  method:'POST',
+  body:JSON.stringify(data)
+ });
+
+ if (result.token) {
+  token = result.token;
+  localStorage.setItem('sf_token', token);
+ }
+
+ form.reset();
+ await loadProfile();
+ msg(result.message || 'Success');
+}
+
+$('#signup').onsubmit = event => {
+ event.preventDefault();
+ authForm(event.target, '/register-account')
+  .catch(error => msg(error.message));
+};
+
+$('#login').onsubmit = event => {
+ event.preventDefault();
+ authForm(event.target, '/login')
+  .catch(error => msg(error.message));
+};
+
+function logout() {
+ token = '';
+ localStorage.removeItem('sf_token');
+ loadProfile();
+ msg('Logged out');
+}
+
+async function loadProfile() {
+ if (!token) {
+  $('#profile').textContent = 'Login to see your profile and wallet.';
+  $('#walletHistory').textContent = 'Login to view coin history.';
+  $('#myEntries').textContent = 'Login to view your entries.';
+  return;
+ }
+
+ try {
+  const player = await api('/me');
+
+  $('#profile').innerHTML = `
+   <b>${escapeHtml(player.avatar || '🔥')} ${escapeHtml(player.name)}</b><br><label>Profile avatar</label><select id="avatarChoice"><option>🔥</option><option>⚡</option><option>🎯</option><option>🛡️</option><option>👑</option><option>🐉</option><option>💎</option><option>🌊</option><option>🌪️</option><option>🌿</option><option>☠️</option><option>⭐</option></select><button class="btn secondary" onclick="saveAvatar()">Save profile picture</button><br>
+   Player ID: ${player.id}<br>
+   Gmail: ${escapeHtml(player.email)}<br>
+   UID: ${escapeHtml(player.ff_uid)}<br>
+   <span class="count">🪙 ${player.coins} SOUL COINS</span>
+  `;
+  await loadWalletHistory();
+  await loadMyEntries();
+  await loadWalletRequests();
+
+ } catch {
+  $('#profile').textContent = 'Session expired. Please login again.';
+  $('#walletHistory').textContent = 'Please login again.';
+  $('#myEntries').textContent = 'Please login again.';
+  token = '';
+  localStorage.removeItem('sf_token');
+ }
+}
+
+async function loadWalletHistory() {
+ if (!token) { $('#walletHistory').textContent = 'Login to view coin history.'; return; }
+ try {
+  const rows = await api('/history');
+  $('#walletHistory').innerHTML = rows.length ? rows.map(x => `<div class="wallet-row"><span>${escapeHtml(x.reason)}<br><small class="muted">${new Date(x.created_at + 'Z').toLocaleString()}</small></span><b>${x.amount > 0 ? '+' : ''}${x.amount}</b></div>`).join('') : 'No coin transactions yet.';
+ } catch(e) { $('#walletHistory').textContent = e.message; }
+}
+
+async function loadMyEntries() {
+ if (!token) { $('#myEntries').textContent = 'Login to view your entries.'; return; }
+ try {
+  const rows = await api('/my-entries');
+  $('#myEntries').innerHTML = rows.length ? rows.map(x => `<div class="wallet-row"><span><b>${escapeHtml(x.name)}</b><br><small class="muted">${escapeHtml(x.gc)} · ${statusLabel(x.status)} · ${new Date(x.match_time).toLocaleString()}</small>${x.position ? `<br>Position: ${x.position}` : ''}${x.team_name ? `<br>Team: ${escapeHtml(x.team_name)}` : ''}${x.room_details_visible ? `<br><b>Room ID:</b> ${escapeHtml(x.room_id)} · <b>Password:</b> ${escapeHtml(x.room_password)}` : '<br><small class="muted">Room details appear during the final 6 minutes when organizer has added them.</small>'}</span><span>#${x.tournament_id}</span></div>`).join('') : 'You have not registered for any tournament yet.';
+ } catch(e) { $('#myEntries').textContent = e.message; }
+}
+
+// Leaderboard
+async function loadLeaders() {
+ try {
+  const rows = await api('/leaderboard');
+
+  $('#leaders').innerHTML = rows.length
+   ? '<ol>' + rows.map(player => `
+      <li>${escapeHtml(player.name)} — ${player.points || 0} points</li>
+     `).join('') + '</ol>'
+   : 'No results published yet.';
+
+ } catch(error) {
+  $('#leaders').textContent = error.message;
+ }
+}
+
+// Organizer panel
+function adminFetch(url, options = {}) {
+ return fetch('/api/admin/' + url, {
+  ...options,
+  headers:{
+   'Content-Type':'application/json',
+   'x-admin-key':adminKey,
+   ...(options.headers || {})
+  }
+ }).then(async response => {
+  const data = await response.json();
+
+  if (!response.ok) {
+   throw Error(data.error || 'Organizer request failed');
+  }
+
+  return data;
+ });
+}
+
+async function unlockOrganizer() {
+ adminKey = $('#admin-key').value;
+
+ if (!adminKey) {
+  return msg('Enter organizer key');
+ }
+
+ try {
+  await adminFetch('tournaments');
+
+  $('#organizerLock').hidden = true;
+  $('#organizerTools').hidden = false;
+
+  await loadAdminTournaments();
+  await loadAdminRegistrations();
+  await loadAdminPlayers();
+  msg('Organizer panel unlocked');
+
+ } catch(error) {
+  adminKey = '';
+  msg(error.message);
+ }
+}
+
+$('#unlockOrganizer').onclick = unlockOrganizer;
+
+$('#lockOrganizer').onclick = () => {
+ adminKey = '';
+ $('#admin-key').value = '';
+ $('#organizerTools').hidden = true;
+ $('#organizerLock').hidden = false;
+ msg('Organizer panel locked');
+};
+
+async function loadAdminTournaments() {
+ try {
+  const allTournaments = await adminFetch('tournaments');
+  const filter=$('#adminCategoryFilter')?.value || '';
+  const tournaments = filter ? allTournaments.filter(t=>t.gc===filter) : allTournaments;
+
+  $('#adminTournamentList').innerHTML = tournaments.length
+   ? tournaments.map(t => `
+    <div class="card tournament">
+     <b>#${t.id} · ${escapeHtml(t.name)}</b>
+
+     <p class="muted">
+      ${escapeHtml(t.gc)} · ${statusLabel(t.status)} ·
+      ${t.registration_open ? 'Registration open' : 'Registration closed'}
+     </p>
+
+     <label>Set status manually</label>
+     <select id="status-${t.id}">
+      <option value="upcoming" ${t.status==='upcoming'?'selected':''}>Scheduled</option>
+      <option value="ongoing" ${t.status==='ongoing'?'selected':''}>Ongoing</option>
+      <option value="results_pending" ${t.status==='results_pending'?'selected':''}>Results Pending</option>
+      <option value="completed" ${t.status==='completed'?'selected':''}>Completed</option>
+     </select>
+
+     <button class="btn secondary" onclick="changeStatus(${t.id})">
+      Save status
+     </button>
+
+     <button class="btn" onclick="loadAdminResultEditor(${t.id})">Open Result Editor</button>
+     <button class="btn secondary"
+      onclick="toggleRegistration(${t.id},${t.registration_open ? 0 : 1})">
+      ${t.registration_open ? 'Close' : 'Open'} registration
+     </button>
+     <label>Room ID</label><input id="room-id-${t.id}" value="${escapeHtml(t.room_id || '')}" placeholder="Room ID">
+     <label>Room password</label><input id="room-pass-${t.id}" value="${escapeHtml(t.room_password || '')}" placeholder="Room password">
+     <button class="btn secondary" onclick="saveRoom(${t.id})">Save room details</button>
+    </div>
+   `).join('')
+   : 'No tournaments scheduled yet.';
+
+ } catch(error) {
+  msg(error.message);
+ }
+}
+
+async function saveRoom(id) {
+ try {
+  const room_id = $('#room-id-' + id).value.trim();
+  const room_password = $('#room-pass-' + id).value.trim();
+  await adminFetch('tournaments/' + id + '/room', { method:'PATCH', body:JSON.stringify({room_id, room_password}) });
+  msg('Room details saved. They appear to registered players in the final 6 minutes.');
+ } catch(e) { msg(e.message); }
+}
+
+async function loadAdminRegistrations() {
+ try {
+  const rows = await adminFetch('registrations');
+  $('#adminRegistrations').innerHTML = rows.length ? rows.map(r => `<div class="wallet-row"><span><b>${escapeHtml(r.name)}</b> · UID ${escapeHtml(r.ff_uid)}<br>${escapeHtml(r.tournament)} (${escapeHtml(r.gc)}) · Position ${r.position || '—'}<br><small class="muted">Team: ${escapeHtml(r.team_name || '—')} · Members: ${escapeHtml(r.member_names || '—')}</small></span><span>#${r.tournament_id}</span></div>`).join('') : 'No registrations yet.';
+ } catch(e) { $('#adminRegistrations').textContent = e.message; }
+}
+$('#refreshRegistrations').onclick = loadAdminRegistrations;
+
+async function loadAdminResultEditor(id) {
+ try {
+  const data=await adminFetch(`tournaments/${id}/participants`),t=data.tournament,players=data.players,isBR=t.gc==='BR Full Map';
+  const root=$('#adminResultEditors');
+  if(!players.length){root.innerHTML='<p>No registered players for this match.</p>';return;}
+  const rows=players.map(p=>`<div class="result-player" data-result-player="${p.id}"><span><b>${escapeHtml(p.name)}</b><br><small class="muted">UID ${escapeHtml(p.ff_uid)} · ${escapeHtml(p.email)} · Wallet ${p.coins}</small></span>${isBR?`<select class="result-value"><option value="">Select kills</option>${Array.from({length:49},(_,n)=>`<option value="${n}" ${p.kills===n?'selected':''}>${n} kills</option>`).join('')}</select>`:`<select class="result-value"><option value="">Select result</option><option value="win" ${p.outcome==='win'?'selected':''}>WIN</option><option value="lose" ${p.outcome==='lose'?'selected':''}>LOSE</option></select>`}</div>`).join('');
+  root.innerHTML=`<div class="result-editor" id="result-editor-${id}"><h4>#${id} · ${escapeHtml(t.name)}</h4><p class="notice-small">${isBR?`Per kill: ${t.per_kill_coins} coins · Max prize pool: ${t.max_prize_coins} coins. Excess rewards are proportionally adjusted to the cap.`:`Each winning player receives ${t.prize_coins} coins. Select exactly half of players as winners.`}</p>${rows}${data.submitted?'<p class=\"notice-small\">Results already submitted for this match.</p>':`<button class=\"btn\" id=\"submit-results-${id}\" disabled style=\"margin-top:12px\">${isBR?'Submit Kills':'Submit Results'}</button>`}<p class=\"muted\" id=\"result-progress-${id}\">0 / ${players.length} selected</p></div>`;
+  const editor=$(`#result-editor-${id}`),selects=[...editor.querySelectorAll('.result-value')],submit=$(`#submit-results-${id}`),progress=$(`#result-progress-${id}`);
+  function refresh(){const count=selects.filter(x=>x.value!=='').length;progress.textContent=`${count} / ${players.length} selected`;if(submit)submit.disabled=count!==players.length;}
+  selects.forEach(x=>x.addEventListener('change',refresh));refresh();
+  if(submit) submit.onclick=async()=>{if(submit.disabled)return;const results=[...editor.querySelectorAll('[data-result-player]')].map(row=>({player_id:Number(row.dataset.resultPlayer),...(isBR?{kills:Number(row.querySelector('select').value)}:{outcome:row.querySelector('select').value})}));if(!confirm(`Submit final results for ${t.name}?`))return;try{const r=await adminFetch(`tournaments/${id}/submit-results`,{method:'POST',body:JSON.stringify({results})});msg(r.message);await loadAdminTournaments();await loadAdminResultEditor(id);await loadAdminPlayers();await loadLeaders();}catch(e){msg(e.message);}};
+  root.scrollIntoView({behavior:'smooth',block:'start'});
+ }catch(e){msg(e.message);}
+}
+async function searchAdminPlayers(){try{const q=$('#playerSearch').value.trim();if(!q)return msg('Enter a Gmail, Player ID, name or UID.');const rows=await adminFetch('player-search?q='+encodeURIComponent(q));$('#playerSearchResults').innerHTML=rows.length?rows.map(p=>`<div class="card" style="margin:8px 0"><b>${escapeHtml(p.name)}</b><br><small>${escapeHtml(p.email)} · UID ${escapeHtml(p.ff_uid)} · Player ID ${p.id}</small><p><b>Wallet: ${p.coins} SOUL COINS</b></p><label>Amount</label><input type="number" min="1" max="100000" id="wallet-amount-${p.id}" value="10"><label>Reason</label><input id="wallet-reason-${p.id}" value="Manual admin adjustment"><button class="btn" onclick="adjustPlayerCoins(${p.id},'add')">Add coins</button> <button class="btn secondary" onclick="adjustPlayerCoins(${p.id},'remove')">Remove coins</button></div>`).join(''):'No matching player found.';}catch(e){$('#playerSearchResults').textContent=e.message;}}
+async function adjustPlayerCoins(id,action){const amount=Number($(`#wallet-amount-${id}`).value),reason=$(`#wallet-reason-${id}`).value.trim();try{const r=await adminFetch(`players/${id}/coins`,{method:'POST',body:JSON.stringify({action,amount,reason})});msg(`${r.message} New balance: ${r.balance}`);await searchAdminPlayers();await loadAdminPlayers();}catch(e){msg(e.message);}}
+$('#searchPlayersBtn').onclick=searchAdminPlayers;
+function updateAutoPrizePreview(){const gc=$('#gcSelect').value,entry=Number($('#entryCoinsInput').value||0),box=$('#autoPrizePreview');if(!box)return;if(gc==='BR Full Map'){box.textContent=`Per kill: ${Math.max(0,entry-2)} coins · Max prize: ${Math.max(0,entry*48-20)} coins (48 × entry fee − 20 host fee).`;}else{const m=(gc.match(/([1-4])v[1-4]/i)||[])[1]||1;box.textContent=`${Number(m)*2} players · Winning reward: ${Math.max(0,entry*2-10)} coins per winning player.`;}}
+
+async function changeStatus(id) {
+ try {
+  const status = $('#status-' + id).value;
+
+  await adminFetch('tournaments/' + id + '/status', {
+   method:'PATCH',
+   body:JSON.stringify({status})
+  });
+
+  msg('Status updated');
+  await loadAdminTournaments();
+
+ } catch(error) {
+  msg(error.message);
+ }
+}
+
+async function toggleRegistration(id, open) {
+ try {
+  await adminFetch('tournaments/' + id + '/registration', {
+   method:'PATCH',
+   body:JSON.stringify({open:!!open})
+  });
+
+  msg('Registration updated');
+  await loadAdminTournaments();
+
+ } catch(error) {
+  msg(error.message);
+ }
+}
+
+// Create tournament
+$('#create-tournament').onsubmit = async event => {
+ event.preventDefault();
+
+ try {
+  const data = Object.fromEntries(new FormData(event.target));
+
+  data.entry_coins = Number(data.entry_coins);
+  const matchCount=(data.gc.match(/([1-4])v[1-4]/i)||[])[1]||1;
+  data.max_players = data.gc==='BR Full Map'?48:Number(matchCount)*2;
+  data.mode = data.gc==='BR Full Map'?'Battle Royale':(data.gc.match(/(1v1|2v2|3v3|4v4)/i)||[])[1]+' '+(data.gc.includes('Head')?'Head':'Body');
+  data.match_time = new Date(data.match_time).toISOString();
+
+  const result = await adminFetch('tournaments', {
+   method:'POST',
+   body:JSON.stringify(data)
+  });
+
+  msg(result.message);
+  event.target.reset();
+  await loadAdminTournaments();
+
+ } catch(error) {
+  msg(error.message);
+ }
+};
+
+// Award virtual coins
+$('#award').onsubmit = async event => {
+ event.preventDefault();
+
+ try {
+  const data = Object.fromEntries(new FormData(event.target));
+  data.amount = Number(data.amount);
+
+  const result = await adminFetch('coins', {
+   method:'POST',
+   body:JSON.stringify(data)
+  });
+
+  msg(result.message);
+  event.target.reset();
+
+ } catch(error) {
+  msg(error.message);
+ }
+};
+
+async function loadAnnouncements(){try{const rows=await api('/announcements');$('#announcements').innerHTML=rows.length?rows.map(a=>`<div class="wallet-row"><span><b>${escapeHtml(a.title)}</b><br>${escapeHtml(a.body)}<br><small class="muted">${new Date(a.created_at+'Z').toLocaleString()}</small></span></div>`).join(''):'No announcements yet.';}catch(e){$('#announcements').textContent=e.message}}
+async function loadAdminPlayers(){try{const rows=await adminFetch('players');$('#adminPlayers').innerHTML=rows.map(p=>`<div class="wallet-row"><span>${escapeHtml(p.avatar||'🔥')} <b>${escapeHtml(p.name)}</b><br>UID ${escapeHtml(p.ff_uid)} · ${p.coins} SOUL COINS<br><small class="muted">${escapeHtml(p.email)}</small></span></div>`).join('')||'No players yet.';}catch(e){$('#adminPlayers').textContent=e.message}}
+$('#announcementForm').onsubmit=async e=>{e.preventDefault();try{const d=Object.fromEntries(new FormData(e.target));const r=await adminFetch('announcements',{method:'POST',body:JSON.stringify(d)});msg(r.message);e.target.reset();await loadAnnouncements();}catch(x){msg(x.message)}};
+$('#refreshPlayers').onclick=loadAdminPlayers;
+
+async function saveAvatar(){try{const avatar=$('#avatarChoice').value;await api('/profile/avatar',{method:'PATCH',body:JSON.stringify({avatar})});msg('Profile picture updated.');await loadProfile();}catch(e){msg(e.message)}}
+
+// Manual contact flow. Real-money purchase and withdrawal routes remain disabled.
+async function loadWalletRequests(){if($('#walletRequests'))$('#walletRequests').textContent='Contact the organizer for wallet assistance.';}
+async function loadUPIConfig(){try{const c=await api('/config'),box=$('#buyCoinsContact'),withdraw=$('#withdrawCoinsContact');if(c.whatsapp_number){const digits=c.whatsapp_number.replace(/\D/g,'');const href=`https://wa.me/${digits}?text=${encodeURIComponent('Hello SOULFIRE admin, I need help with my SOUL COINS. My Player ID / registered Gmail is: ')}`;const link=`<a class="btn" target="_blank" rel="noopener noreferrer" href="${href}">WhatsApp ${digits}</a>`;box.innerHTML=link+`<p class="muted">Message this number with your Player ID or registered Gmail for a manual wallet top-up request.</p><a target="_blank" rel="noopener noreferrer" href="${c.whatsapp_community}">Join SOULFIRE WhatsApp Community</a>`;if(withdraw)withdraw.innerHTML=link+`<p class="muted">Send your Player ID, Gmail and requested amount. Payouts are not processed automatically.</p><a target="_blank" rel="noopener noreferrer" href="${c.whatsapp_community}">Join SOULFIRE WhatsApp Community</a>`;}else{box.textContent='Organizer WhatsApp is not configured.';if(withdraw)withdraw.textContent='Organizer WhatsApp is not configured.';}}catch(e){$('#buyCoinsContact').textContent=e.message;}}
+// Initial setup
+function setup() {
+ renderGCs();
+
+ $('#gcSelect').innerHTML = GCS.map(gc =>
+  `<option value="${escapeHtml(gc)}">${escapeHtml(gc)}</option>`
+ ).join('');
+ $('#adminCategoryFilter').innerHTML='<option value="">All categories</option>'+GCS.map(gc=>`<option value="${escapeHtml(gc)}">${escapeHtml(gc)}</option>`).join('');
+ $('#adminCategoryFilter').addEventListener('change',loadAdminTournaments);
+ $('#gcSelect').addEventListener('change',updateAutoPrizePreview);
+ $('#entryCoinsInput').addEventListener('input',updateAutoPrizePreview);
+ updateAutoPrizePreview();
+
+ loadProfile();
+ loadLeaders();
+ loadUPIConfig();
+ loadAnnouncements();
+
+ const video = $('#natureVideo');
+ video.play().catch(() => {});
+}
+
+setup();
+</script>
+<a class="community-float" href="https://chat.whatsapp.com/FT98fdcWdS21s3SxEk6sQk" target="_blank" rel="noopener noreferrer" aria-label="Join SOULFIRE WhatsApp Community"><span>Join WhatsApp Community</span>✆</a>
+</body>
+</html>
