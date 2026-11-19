@@ -1,11 +1,11 @@
 require('dotenv').config();
 
 const express = require('express');
-const Database = require('better-sqlite3');
+const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const path = require('path');
-const fs = require('fs');
+const { AsyncLocalStorage } = require('async_hooks');
 
 if (!process.env.JWT_SECRET ||
     process.env.JWT_SECRET.startsWith('replace_') ||
@@ -15,36 +15,54 @@ if (!process.env.JWT_SECRET ||
 }
 
 const app = express();
-const dataDir = path.join(__dirname, 'data');
-
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
+if (!process.env.DATABASE_URL) {
+  throw new Error('Set DATABASE_URL to your Neon PostgreSQL connection string.');
 }
 
-const db = new Database(path.join(dataDir, 'soulfire.db'));
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: true }
+});
+const transactionStorage = new AsyncLocalStorage();
 
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
-db.pragma('busy_timeout = 5000');
+function queryClient() {
+  return transactionStorage.getStore() || pool;
+}
+
+async function query(sql, params) {
+  return queryClient().query(sql, params);
+}
+
+async function queryOne(sql, params) {
+  const result = await query(sql, params);
+  return result.rows[0];
+}
+
+async function queryRows(sql, params) {
+  const result = await query(sql, params);
+  return result.rows;
+}
 
 app.use(express.json({ limit: '30kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // DATABASE
 
-db.exec(`
+async function initializeDatabase() {
+  await pool.query(`
 CREATE TABLE IF NOT EXISTS players (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
   email TEXT NOT NULL UNIQUE,
   ff_uid TEXT NOT NULL UNIQUE,
   password TEXT NOT NULL,
   coins INTEGER NOT NULL DEFAULT 0 CHECK(coins >= 0),
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  created_at TEXT NOT NULL DEFAULT (TO_CHAR(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  avatar TEXT NOT NULL DEFAULT '🔥'
 );
 
 CREATE TABLE IF NOT EXISTS tournaments (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
   game TEXT DEFAULT 'Free Fire',
   mode TEXT DEFAULT 'Squad',
@@ -53,56 +71,68 @@ CREATE TABLE IF NOT EXISTS tournaments (
   match_time TEXT NOT NULL,
   status TEXT DEFAULT 'upcoming',
   max_players INTEGER DEFAULT 48,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  created_at TEXT NOT NULL DEFAULT (TO_CHAR(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  gc TEXT NOT NULL DEFAULT 'BR Full Map',
+  registration_open INTEGER NOT NULL DEFAULT 1 CHECK (registration_open IN (0,1)),
+  details TEXT NOT NULL DEFAULT '',
+  prize_coins INTEGER NOT NULL DEFAULT 0,
+  room_id TEXT NOT NULL DEFAULT '',
+  room_password TEXT NOT NULL DEFAULT '',
+  per_kill_coins INTEGER NOT NULL DEFAULT 0,
+  max_prize_coins INTEGER NOT NULL DEFAULT 0,
+  host_fee_coins INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS registrations (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   player_id INTEGER NOT NULL,
   tournament_id INTEGER NOT NULL,
-  team_name TEXT DEFAULT '',
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  team_name TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (TO_CHAR(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  position INTEGER,
+  member_names TEXT NOT NULL DEFAULT '',
   UNIQUE(player_id, tournament_id),
   FOREIGN KEY(player_id) REFERENCES players(id),
   FOREIGN KEY(tournament_id) REFERENCES tournaments(id)
 );
 
 CREATE TABLE IF NOT EXISTS coin_history (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   player_id INTEGER NOT NULL,
   amount INTEGER NOT NULL,
   reason TEXT NOT NULL,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  created_at TEXT NOT NULL DEFAULT (TO_CHAR(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
   FOREIGN KEY(player_id) REFERENCES players(id)
 );
 
 CREATE TABLE IF NOT EXISTS results (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   tournament_id INTEGER NOT NULL,
   player_name TEXT NOT NULL,
-  points INTEGER DEFAULT 0,
-  position INTEGER DEFAULT 0
+  points INTEGER NOT NULL DEFAULT 0,
+  position INTEGER NOT NULL DEFAULT 0,
+  reward_coins INTEGER NOT NULL DEFAULT 0
 );
 
 
 CREATE TABLE IF NOT EXISTS payment_methods (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   player_id INTEGER NOT NULL,
   label TEXT NOT NULL DEFAULT 'My UPI',
   upi_id TEXT NOT NULL,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  created_at TEXT NOT NULL DEFAULT (TO_CHAR(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
   FOREIGN KEY(player_id) REFERENCES players(id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS announcements (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   title TEXT NOT NULL,
   body TEXT NOT NULL,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  created_at TEXT NOT NULL DEFAULT (TO_CHAR(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'))
 );
 
 CREATE TABLE IF NOT EXISTS wallet_requests (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   player_id INTEGER NOT NULL,
   request_type TEXT NOT NULL CHECK(request_type IN ('deposit','withdrawal')),
   amount_inr INTEGER NOT NULL,
@@ -111,62 +141,51 @@ CREATE TABLE IF NOT EXISTS wallet_requests (
   utr TEXT UNIQUE,
   status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected','paid')),
   admin_note TEXT NOT NULL DEFAULT '',
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  created_at TEXT NOT NULL DEFAULT (TO_CHAR(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
+  updated_at TEXT NOT NULL DEFAULT (TO_CHAR(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
   FOREIGN KEY(player_id) REFERENCES players(id)
 );
-`);
-
-function ensureColumn(table, column, definition) {
-  const columns = db.prepare(
-    `PRAGMA table_info(${table})`
-  ).all().map(c => c.name);
-
-  if (!columns.includes(column)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-  }
-}
-
-// SAFE DATABASE UPDATES
-
-ensureColumn('players', 'avatar', "TEXT NOT NULL DEFAULT '🔥'");
-
-ensureColumn('tournaments', 'gc', "TEXT NOT NULL DEFAULT 'BR Full Map'");
-ensureColumn('tournaments', 'registration_open', 'INTEGER NOT NULL DEFAULT 1');
-ensureColumn('tournaments', 'details', "TEXT NOT NULL DEFAULT ''");
-ensureColumn('tournaments', 'prize_coins', 'INTEGER NOT NULL DEFAULT 0');
-ensureColumn('tournaments', 'room_id', "TEXT NOT NULL DEFAULT ''");
-ensureColumn('tournaments', 'room_password', "TEXT NOT NULL DEFAULT ''");
-
-ensureColumn('registrations', 'position', 'INTEGER');
-ensureColumn('registrations', 'team_name', "TEXT NOT NULL DEFAULT ''");
-ensureColumn('registrations', 'member_names', "TEXT NOT NULL DEFAULT ''");
-ensureColumn('results', 'reward_coins', 'INTEGER NOT NULL DEFAULT 0');
-
-ensureColumn('tournaments', 'per_kill_coins', 'INTEGER NOT NULL DEFAULT 0');
-ensureColumn('tournaments', 'max_prize_coins', 'INTEGER NOT NULL DEFAULT 0');
-ensureColumn('tournaments', 'host_fee_coins', 'INTEGER NOT NULL DEFAULT 0');
-
-db.exec(`
 CREATE TABLE IF NOT EXISTS match_results (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   tournament_id INTEGER NOT NULL,
   player_id INTEGER NOT NULL,
   kills INTEGER NOT NULL DEFAULT 0,
   outcome TEXT NOT NULL DEFAULT '',
   reward_coins INTEGER NOT NULL DEFAULT 0,
-  submitted_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  submitted_at TEXT NOT NULL DEFAULT (TO_CHAR(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')),
   UNIQUE(tournament_id, player_id),
   FOREIGN KEY(tournament_id) REFERENCES tournaments(id),
   FOREIGN KEY(player_id) REFERENCES players(id)
 );
-`);
 
-db.exec(`
 CREATE UNIQUE INDEX IF NOT EXISTS idx_registration_slot
 ON registrations(tournament_id, position)
 WHERE position IS NOT NULL
+;
 `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_coin_history_player_id ON coin_history(player_id, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_wallet_requests_player_id ON wallet_requests(player_id, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_registrations_tournament_id ON registrations(tournament_id);
+    CREATE INDEX IF NOT EXISTS idx_results_tournament_id ON results(tournament_id);
+    CREATE INDEX IF NOT EXISTS idx_tournaments_match_time ON tournaments(match_time, id DESC)
+  `);
+}
+
+async function withTransaction(callback) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await transactionStorage.run(client, callback);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
 
 // GC LIST
 
@@ -233,24 +252,37 @@ function cleanText(value, max = 200) {
     : '';
 }
 
-function addCoins(playerId, amount, reason) {
+function idParam(value) {
+  const id = Number(value);
+  return Number.isSafeInteger(id) && id > 0 ? id : -1;
+}
+
+async function addCoins(playerId, amount, reason) {
   if (!Number.isInteger(amount) || amount <= 0) {
     throw new Error('Coin amount must be a positive integer');
   }
 
-  db.prepare(
-    'UPDATE players SET coins = coins + ? WHERE id = ?'
-  ).run(amount, playerId);
+  const player = await queryOne(
+    'SELECT id FROM players WHERE id = $1 FOR UPDATE',
+    [playerId]
+  );
+  if (!player) throw new Error('Player not found');
 
-  db.prepare(`
+  const balanceUpdate = await query(
+    'UPDATE players SET coins = coins + $1 WHERE id = $2',
+    [amount, playerId]
+  );
+  if (!balanceUpdate.rowCount) throw new Error('Player not found');
+
+  await query(`
     INSERT INTO coin_history(player_id, amount, reason)
-    VALUES(?,?,?)
-  `).run(playerId, amount, reason);
+    VALUES($1,$2,$3)
+  `, [playerId, amount, reason]);
 }
 
 // PUBLIC ROUTES
 
-app.get('/api/config', (req, res) => {
+app.get('/api/config', async (req, res) => {
   res.json({
     gcs: GCS,
     coin_name: 'SOUL COINS',
@@ -261,18 +293,18 @@ app.get('/api/config', (req, res) => {
   });
 });
 
-app.get('/api/announcements', (req, res) => {
-  res.json(db.prepare('SELECT id,title,body,created_at FROM announcements ORDER BY id DESC LIMIT 20').all());
+app.get('/api/announcements', async (req, res) => {
+  res.json(await queryRows('SELECT id,title,body,created_at FROM announcements ORDER BY id DESC LIMIT 20', []));
 });
 
-app.get('/api/health', (req, res) => {
+app.get('/api/health', async (req, res) => {
   res.json({
     status: 'online',
     name: 'SOULFIRE ESPORTS'
   });
 });
 
-app.get('/api/tournaments', (req, res) => {
+app.get('/api/tournaments', async (req, res) => {
   const { gc, status } = req.query;
 
   let sql = `
@@ -286,12 +318,12 @@ app.get('/api/tournaments', (req, res) => {
   const params = [];
 
   if (gc && GCS.includes(gc)) {
-    conditions.push('gc = ?');
+    conditions.push(`gc = $${params.length + 1}`);
     params.push(gc);
   }
 
   if (status && VALID_STATUSES.has(status)) {
-    conditions.push('status = ?');
+    conditions.push(`status = $${params.length + 1}`);
     params.push(status);
   }
 
@@ -301,20 +333,20 @@ app.get('/api/tournaments', (req, res) => {
 
   sql += ' ORDER BY match_time ASC, id DESC';
 
-  res.json(db.prepare(sql).all(...params));
+  res.json(await queryRows(sql, params));
 });
 
-app.get('/api/leaderboard', (req, res) => {
-  const rows = db.prepare(`
+app.get('/api/leaderboard', async (req, res) => {
+  const rows = await queryRows(`
     SELECT p.name,
-    COALESCE(SUM(r.points),0) AS points,
+    COALESCE(SUM(r.points),0)::INTEGER AS points,
     MIN(NULLIF(r.position,0)) AS best_position
     FROM results r
     JOIN players p ON p.name = r.player_name
     GROUP BY p.id
     ORDER BY points DESC, best_position ASC
     LIMIT 50
-  `).all();
+  `, []);
 
   res.json(rows);
 });
@@ -343,13 +375,14 @@ app.post('/api/register-account', async (req, res) => {
 
     const hash = await bcrypt.hash(password, 12);
 
-    const info = db.prepare(`
+    const info = await query(`
       INSERT INTO players(name,email,ff_uid,password,coins)
-      VALUES(?,?,?,?,0)
-    `).run(name, email, ff_uid, hash);
+      VALUES($1,$2,$3,$4,0)
+      RETURNING id
+    `, [name, email, ff_uid, hash]);
 
     res.json({
-      token: issueToken(info.lastInsertRowid),
+      token: issueToken(info.rows[0].id),
       message: 'Account created',
       coins: 0
     });
@@ -366,9 +399,9 @@ app.post('/api/login', async (req, res) => {
   const password = typeof req.body.password === 'string'
     ? req.body.password : '';
 
-  const player = db.prepare(
-    'SELECT * FROM players WHERE email = ?'
-  ).get(email);
+  const player = await queryOne(
+    'SELECT * FROM players WHERE email = $1'
+  , [email]);
 
   if (!player || !await bcrypt.compare(password, player.password)) {
     return res.status(401).json({
@@ -379,11 +412,11 @@ app.post('/api/login', async (req, res) => {
   res.json({ token: issueToken(player.id) });
 });
 
-app.get('/api/me', auth, (req, res) => {
-  const player = db.prepare(`
+app.get('/api/me', auth, async (req, res) => {
+  const player = await queryOne(`
     SELECT id,name,email,ff_uid,coins,avatar,created_at
-    FROM players WHERE id = ?
-  `).get(req.player.id);
+    FROM players WHERE id = $1
+  `, [req.player.id]);
 
   if (!player) {
     return res.status(404).json({ error: 'Player not found' });
@@ -392,139 +425,112 @@ app.get('/api/me', auth, (req, res) => {
   res.json(player);
 });
 
-app.get('/api/history', auth, (req, res) => {
-  const history = db.prepare(`
+app.get('/api/history', auth, async (req, res) => {
+  const history = await queryRows(`
     SELECT amount,reason,created_at
     FROM coin_history
-    WHERE player_id = ?
+    WHERE player_id = $1
     ORDER BY id DESC LIMIT 200
-  `).all(req.player.id);
+  `, [req.player.id]);
 
   res.json(history);
 });
 
 // UPI deposits are user-initiated and manually verified by the organizer.
-const coinsPerRupee = Math.max(1, Math.min(100, Number(process.env.SOUL_COINS_PER_RUPEE || 1)));
-app.post('/api/wallet/topup', auth, (req, res) => { return res.status(403).json({error:'Real-money coin purchases are disabled pending legal and provider approval. Contact the organizer for information.'});
-  const amount = Number(req.body.amount_inr);
-  const utr = cleanText(req.body.utr, 40).replace(/\s/g, '');
-  if (!Number.isInteger(amount) || amount < 10 || amount > 10000 || !/^[A-Za-z0-9-]{8,40}$/.test(utr)) {
-    return res.status(400).json({ error: 'Enter an amount between ₹10 and ₹10,000 and a valid UTR/reference number.' });
-  }
-  if (!process.env.UPI_ID) return res.status(503).json({ error: 'Organizer UPI ID is not configured yet. Ask the organizer to set UPI_ID in .env.' });
-  try {
-    const coins = amount * coinsPerRupee;
-    const info = db.prepare(`INSERT INTO wallet_requests(player_id,request_type,amount_inr,coins,utr) VALUES(?,?,?,?,?)`)
-      .run(req.player.id, 'deposit', amount, coins, utr);
-    res.json({ message: 'Top-up request submitted. SOUL COINS will be credited only after organizer verifies the UPI payment.', request_id: info.lastInsertRowid, coins_pending: coins });
-  } catch (e) { res.status(400).json({ error: 'This UTR/reference may already be used. Check it and try again.' }); }
+app.post('/api/wallet/topup', auth, async (req, res) => {
+  res.status(403).json({error:'Real-money coin purchases are disabled pending legal and provider approval. Contact the organizer for information.'});
 });
 
-app.get('/api/wallet/requests', auth, (req, res) => {
-  res.json(db.prepare(`SELECT id,request_type,amount_inr,coins,upi_id,utr,status,admin_note,created_at FROM wallet_requests WHERE player_id=? ORDER BY id DESC LIMIT 100`).all(req.player.id));
+app.get('/api/wallet/requests', auth, async (req, res) => {
+  res.json(await queryRows(`SELECT id,request_type,amount_inr,coins,upi_id,utr,status,admin_note,created_at FROM wallet_requests WHERE player_id=$1 ORDER BY id DESC LIMIT 100`, [req.player.id]));
 });
 
-app.post('/api/wallet/withdraw', auth, (req, res) => { return res.status(403).json({error:'Cash withdrawals are disabled pending legal and provider approval.'});
-  const coins = Number(req.body.coins);
-  const upi = cleanText(req.body.upi_id, 120);
-  if (!Number.isInteger(coins) || coins < 100 || coins > 1000000 || !/^[\w.\-]{2,256}@[\w]{2,64}$/.test(upi)) return res.status(400).json({ error: 'Minimum withdrawal is 100 SOUL COINS. Enter a valid UPI ID.' });
-  try {
-    const result = db.transaction(() => {
-      const player = db.prepare('SELECT coins FROM players WHERE id=?').get(req.player.id);
-      if (!player || player.coins < coins) throw new Error('Not enough SOUL COINS.');
-      const amount = Math.floor(coins / coinsPerRupee);
-      if (amount < 1) throw new Error('Withdrawal amount is too small.');
-      db.prepare('UPDATE players SET coins=coins-? WHERE id=?').run(coins, req.player.id);
-      db.prepare('INSERT INTO coin_history(player_id,amount,reason) VALUES(?,?,?)').run(req.player.id, -coins, 'Withdrawal request pending');
-      const info = db.prepare(`INSERT INTO wallet_requests(player_id,request_type,amount_inr,coins,upi_id) VALUES(?,'withdrawal',?,?,?)`).run(req.player.id, amount, coins, upi);
-      return info.lastInsertRowid;
-    })();
-    res.json({ message: 'Withdrawal request submitted. Organizer will review and process it manually.', request_id: result });
-  } catch (e) { res.status(400).json({ error: e.message || 'Could not submit withdrawal.' }); }
+app.post('/api/wallet/withdraw', auth, async (req, res) => {
+  res.status(403).json({error:'Cash withdrawals are disabled pending legal and provider approval.'});
 });
 
-app.get('/api/payment-methods', auth, (req, res) => {
-  res.json(db.prepare('SELECT id,label,upi_id,created_at FROM payment_methods WHERE player_id=? ORDER BY id DESC').all(req.player.id));
+app.get('/api/payment-methods', auth, async (req, res) => {
+  res.json(await queryRows('SELECT id,label,upi_id,created_at FROM payment_methods WHERE player_id=$1 ORDER BY id DESC', [req.player.id]));
 });
-app.post('/api/payment-methods', auth, (req, res) => {
+app.post('/api/payment-methods', auth, async (req, res) => {
   const label = cleanText(req.body.label || 'My UPI', 40);
   const upi = cleanText(req.body.upi_id, 120);
   if (!/^[\w.\-]{2,256}@[\w]{2,64}$/.test(upi)) return res.status(400).json({ error: 'Enter a valid UPI ID, for example name@bank.' });
-  const info = db.prepare('INSERT INTO payment_methods(player_id,label,upi_id) VALUES(?,?,?)').run(req.player.id,label,upi);
-  res.json({ message: 'UPI payment method saved.', id: info.lastInsertRowid });
+  const info = await query('INSERT INTO payment_methods(player_id,label,upi_id) VALUES($1,$2,$3) RETURNING id', [req.player.id, label, upi]);
+  res.json({ message: 'UPI payment method saved.', id: info.rows[0].id });
 });
-app.delete('/api/payment-methods/:id', auth, (req, res) => {
-  const info = db.prepare('DELETE FROM payment_methods WHERE id=? AND player_id=?').run(req.params.id,req.player.id);
-  if (!info.changes) return res.status(404).json({ error: 'Payment method not found.' });
+app.delete('/api/payment-methods/:id', auth, async (req, res) => {
+  const info = await query('DELETE FROM payment_methods WHERE id=$1 AND player_id=$2', [idParam(req.params.id), req.player.id]);
+  if (!info.rowCount) return res.status(404).json({ error: 'Payment method not found.' });
   res.json({ message: 'Payment method removed.' });
 });
-app.patch('/api/profile/avatar', auth, (req, res) => {
+app.patch('/api/profile/avatar', auth, async (req, res) => {
   const allowed = ['🔥','⚡','🎯','🛡️','👑','🐉','💎','🌊','🌪️','🌿','☠️','⭐'];
   const avatar = req.body.avatar;
   if (!allowed.includes(avatar)) return res.status(400).json({ error: 'Choose an available profile avatar.' });
-  db.prepare('UPDATE players SET avatar=? WHERE id=?').run(avatar,req.player.id);
+  await query('UPDATE players SET avatar=$1 WHERE id=$2', [avatar, req.player.id]);
   res.json({ message: 'Profile picture updated.', avatar });
 });
 
 // Organizer wallet review. Deposits credit coins only after manual UPI verification.
-app.get('/api/admin/wallet-requests', admin, (req, res) => {
-  res.json(db.prepare(`SELECT w.*,p.name,p.ff_uid,p.email FROM wallet_requests w JOIN players p ON p.id=w.player_id ORDER BY CASE w.status WHEN 'pending' THEN 0 ELSE 1 END,w.id DESC LIMIT 300`).all());
+app.get('/api/admin/wallet-requests', admin, async (req, res) => {
+  res.json(await queryRows(`SELECT w.*,p.name,p.ff_uid,p.email FROM wallet_requests w JOIN players p ON p.id=w.player_id ORDER BY CASE w.status WHEN 'pending' THEN 0 ELSE 1 END,w.id DESC LIMIT 300`, []));
 });
-app.post('/api/admin/wallet-requests/:id/decision', admin, (req, res) => {
+app.post('/api/admin/wallet-requests/:id/decision', admin, async (req, res) => {
   const decision = req.body.decision;
   const note = cleanText(req.body.note || '', 250);
   if (!['approve','reject','paid'].includes(decision)) return res.status(400).json({ error: 'Invalid wallet decision.' });
   try {
-    const result = db.transaction(() => {
-      const row = db.prepare('SELECT * FROM wallet_requests WHERE id=?').get(req.params.id);
+    const result = await withTransaction(async () => {
+      const row = await queryOne('SELECT * FROM wallet_requests WHERE id=$1 FOR UPDATE', [idParam(req.params.id)]);
       if (!row || row.status !== 'pending') throw new Error('Request not found or already processed.');
       if (row.request_type === 'deposit') {
         if (decision === 'approve') {
-          addCoins(row.player_id,row.coins,`Verified UPI top-up #${row.id}`);
-          db.prepare("UPDATE wallet_requests SET status='approved',admin_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(note,row.id);
+          await addCoins(row.player_id,row.coins,`Verified UPI top-up #${row.id}`);
+          await query("UPDATE wallet_requests SET status='approved',admin_note=$1,updated_at=TO_CHAR(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') WHERE id=$2", [note, row.id]);
         } else if (decision === 'reject') {
-          db.prepare("UPDATE wallet_requests SET status='rejected',admin_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(note,row.id);
+          await query("UPDATE wallet_requests SET status='rejected',admin_note=$1,updated_at=TO_CHAR(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') WHERE id=$2", [note, row.id]);
         } else throw new Error('Deposit requests can only be approved or rejected.');
       } else {
         if (decision === 'paid') {
-          db.prepare("UPDATE wallet_requests SET status='paid',admin_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(note,row.id);
+          await query("UPDATE wallet_requests SET status='paid',admin_note=$1,updated_at=TO_CHAR(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') WHERE id=$2", [note, row.id]);
         } else if (decision === 'reject') {
-          db.prepare('UPDATE players SET coins=coins+? WHERE id=?').run(row.coins,row.player_id);
-          db.prepare('INSERT INTO coin_history(player_id,amount,reason) VALUES(?,?,?)').run(row.player_id,row.coins,`Refund: withdrawal request #${row.id} rejected`);
-          db.prepare("UPDATE wallet_requests SET status='rejected',admin_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").run(note,row.id);
+          await addCoins(row.player_id,row.coins,`Refund: withdrawal request #${row.id} rejected`);
+          await query("UPDATE wallet_requests SET status='rejected',admin_note=$1,updated_at=TO_CHAR(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') WHERE id=$2", [note, row.id]);
         } else throw new Error('Withdrawal requests can only be marked paid or rejected.');
       }
       return row;
-    })();
+    });
     res.json({ message: result.request_type === 'deposit' ? (decision === 'approve' ? 'Deposit verified and SOUL COINS credited.' : 'Deposit rejected.') : (decision === 'paid' ? 'Withdrawal marked paid. Complete the UPI transfer separately.' : 'Withdrawal rejected and coins refunded.') });
   } catch(e) { res.status(400).json({ error: e.message }); }
 });
-app.get('/api/tournaments/:id/results', (req, res) => {
-  const tournament = db.prepare('SELECT gc FROM tournaments WHERE id=?').get(req.params.id);
+app.get('/api/tournaments/:id/results', async (req, res) => {
+  const tournament = await queryOne('SELECT gc FROM tournaments WHERE id=$1', [idParam(req.params.id)]);
   if (!tournament) return res.status(404).json({error:'Match not found.'});
-  const rows = db.prepare(`SELECT p.name,m.kills,m.outcome,m.reward_coins
+  const rows = await queryRows(`SELECT p.name,m.kills,m.outcome,m.reward_coins
     FROM match_results m JOIN players p ON p.id=m.player_id
-    WHERE m.tournament_id=? ORDER BY m.reward_coins DESC,m.kills DESC,p.name`).all(req.params.id);
+    WHERE m.tournament_id=$1 ORDER BY m.reward_coins DESC,m.kills DESC,p.name`, [idParam(req.params.id)]);
   res.json({gc:tournament.gc,results:rows});
 });
 
 // PUBLIC SLOT AVAILABILITY
-app.get('/api/tournaments/:id/slots', (req, res) => {
-  const tournament = db.prepare('SELECT id,gc,max_players FROM tournaments WHERE id = ?').get(req.params.id);
+app.get('/api/tournaments/:id/slots', async (req, res) => {
+  const tournament = await queryOne('SELECT id,gc,max_players FROM tournaments WHERE id = $1', [idParam(req.params.id)]);
   if (!tournament) return res.status(404).json({ error: 'Tournament not found' });
-  const booked = db.prepare('SELECT position FROM registrations WHERE tournament_id = ? AND position IS NOT NULL ORDER BY position').all(tournament.id).map(x => x.position);
+  const bookedRows = await queryRows('SELECT position FROM registrations WHERE tournament_id = $1 AND position IS NOT NULL ORDER BY position', [tournament.id]);
+  const booked = bookedRows.map(x => x.position);
   res.json({ tournament_id: tournament.id, gc: tournament.gc, max_players: tournament.max_players, booked, available: Array.from({length: tournament.max_players}, (_, i) => i + 1).filter(n => !booked.includes(n)) });
 });
 
 // PLAYER'S REGISTRATIONS
-app.get('/api/my-entries', auth, (req, res) => {
-  const rows = db.prepare(`
+app.get('/api/my-entries', auth, async (req, res) => {
+  const rows = await queryRows(`
     SELECT r.id AS registration_id, r.position, r.team_name, r.created_at AS registered_at,
       t.id AS tournament_id, t.name, t.gc, t.mode, t.match_time, t.status,
       t.entry_coins, t.room_id, t.room_password
     FROM registrations r JOIN tournaments t ON t.id = r.tournament_id
-    WHERE r.player_id = ? ORDER BY t.match_time DESC, r.id DESC
-  `).all(req.player.id);
+    WHERE r.player_id = $1 ORDER BY t.match_time DESC, r.id DESC
+  `, [req.player.id]);
   res.json(rows.map(row => {
     const reveal = Date.parse(row.match_time) - Date.now() <= 6 * 60 * 1000;
     return { ...row, room_id: reveal ? row.room_id : '', room_password: reveal ? row.room_password : '', room_details_visible: reveal && Boolean(row.room_id && row.room_password) };
@@ -533,16 +539,16 @@ app.get('/api/my-entries', auth, (req, res) => {
 
 // TOURNAMENT REGISTRATION
 
-app.post('/api/tournaments/:id/join', auth, (req, res) => {
+app.post('/api/tournaments/:id/join', auth, async (req, res) => {
   try {
-    const result = db.transaction(() => {
-      const tournament = db.prepare(
-        'SELECT * FROM tournaments WHERE id = ?'
-      ).get(req.params.id);
+    const result = await withTransaction(async () => {
+      const tournament = await queryOne(
+        'SELECT * FROM tournaments WHERE id = $1 FOR UPDATE'
+      , [idParam(req.params.id)]);
 
-      const player = db.prepare(
-        'SELECT * FROM players WHERE id = ?'
-      ).get(req.player.id);
+      const player = await queryOne(
+        'SELECT * FROM players WHERE id = $1 FOR UPDATE'
+      , [req.player.id]);
 
       if (!tournament) throw new Error('Tournament not found');
       if (!player) throw new Error('Player not found');
@@ -558,10 +564,11 @@ app.post('/api/tournaments/:id/join', auth, (req, res) => {
         throw new Error('Registration has closed');
       }
 
-      const count = db.prepare(`
+      const countRow = await queryOne(`
         SELECT COUNT(*) AS n
-        FROM registrations WHERE tournament_id = ?
-      `).get(tournament.id).n;
+        FROM registrations WHERE tournament_id = $1
+      `, [tournament.id]);
+      const count = Number(countRow.n);
 
       if (count >= tournament.max_players) {
         throw new Error('Tournament is full');
@@ -570,10 +577,10 @@ app.post('/api/tournaments/:id/join', auth, (req, res) => {
       const teamName = cleanText(req.body.team_name || '', 80);
       const memberNames = cleanText(req.body.member_names || '', 500);
 
-      const already = db.prepare(`
+      const already = await queryOne(`
         SELECT id FROM registrations
-        WHERE player_id = ? AND tournament_id = ?
-      `).get(player.id, tournament.id);
+        WHERE player_id = $1 AND tournament_id = $2
+      `, [player.id, tournament.id]);
 
       if (already) {
         throw new Error('Already registered');
@@ -594,10 +601,10 @@ app.post('/api/tournaments/:id/join', auth, (req, res) => {
           );
         }
 
-        const taken = db.prepare(`
+        const taken = await queryOne(`
           SELECT id FROM registrations
-          WHERE tournament_id = ? AND position = ?
-        `).get(tournament.id, position);
+          WHERE tournament_id = $1 AND position = $2
+        `, [tournament.id, position]);
 
         if (taken) {
           throw new Error('This position is already booked');
@@ -615,24 +622,24 @@ app.post('/api/tournaments/:id/join', auth, (req, res) => {
         throw new Error('Not enough SOUL COINS. Please top up your wallet.');
       }
 
-      db.prepare(`
-        UPDATE players SET coins = coins - ? WHERE id = ?
-      `).run(tournament.entry_coins, player.id);
+      const debit = await query(`
+        UPDATE players SET coins = coins - $1
+        WHERE id = $2 AND coins >= $3
+      `, [tournament.entry_coins, player.id, tournament.entry_coins]);
+      if (!debit.rowCount) {
+        throw new Error('Not enough SOUL COINS. Please top up your wallet.');
+      }
 
-      db.prepare(`
+      await query(`
         INSERT INTO registrations(player_id,tournament_id,position,team_name,member_names)
-        VALUES(?,?,?,?,?)
-      `).run(player.id, tournament.id, position, teamName, memberNames);
+        VALUES($1,$2,$3,$4,$5)
+      `, [player.id, tournament.id, position, teamName, memberNames]);
 
       if (tournament.entry_coins > 0) {
-        db.prepare(`
+        await query(`
           INSERT INTO coin_history(player_id,amount,reason)
-          VALUES(?,?,?)
-        `).run(
-          player.id,
-          -tournament.entry_coins,
-          `Tournament entry: ${tournament.name}`
-        );
+          VALUES($1,$2,$3)
+        `, [player.id, -tournament.entry_coins, `Tournament entry: ${tournament.name}`]);
       }
 
       return {
@@ -643,7 +650,7 @@ app.post('/api/tournaments/:id/join', auth, (req, res) => {
         refund_policy:
           'Entry coins are not refunded if you do not join the match.'
       };
-    })();
+    });
 
     res.json(result);
 
@@ -654,8 +661,8 @@ app.post('/api/tournaments/:id/join', auth, (req, res) => {
 
 // PLAYER MATCH DETAILS
 
-app.get('/api/tournaments/:id/my-entry', auth, (req, res) => {
-  const entry = db.prepare(`
+app.get('/api/tournaments/:id/my-entry', auth, async (req, res) => {
+  const entry = await queryOne(`
     SELECT
       r.id AS registration_id,
       r.position,
@@ -671,8 +678,8 @@ app.get('/api/tournaments/:id/my-entry', auth, (req, res) => {
       t.room_password
     FROM registrations r
     JOIN tournaments t ON t.id = r.tournament_id
-    WHERE r.tournament_id = ? AND r.player_id = ?
-  `).get(req.params.id, req.player.id);
+    WHERE r.tournament_id = $1 AND r.player_id = $2
+  `, [idParam(req.params.id), req.player.id]);
 
   if (!entry) {
     return res.status(404).json({
@@ -683,13 +690,13 @@ app.get('/api/tournaments/:id/my-entry', auth, (req, res) => {
   const reveal =
     Date.parse(entry.match_time) - Date.now() <= 6 * 60 * 1000;
 
-  const roster = db.prepare(`
+  const roster = await queryRows(`
     SELECT p.name AS player_name, r.position
     FROM registrations r
     JOIN players p ON p.id = r.player_id
-    WHERE r.tournament_id = ?
+    WHERE r.tournament_id = $1
     ORDER BY r.position IS NULL, r.position ASC, r.id ASC
-  `).all(entry.tournament_id);
+  `, [entry.tournament_id]);
 
   res.json({
     ...entry,
@@ -703,28 +710,28 @@ app.get('/api/tournaments/:id/my-entry', auth, (req, res) => {
 
 // ORGANIZER TOURNAMENTS
 
-app.get('/api/admin/tournaments', admin, (req, res) => {
-  const rows = db.prepare(`
+app.get('/api/admin/tournaments', admin, async (req, res) => {
+  const rows = await queryRows(`
     SELECT * FROM tournaments
     ORDER BY match_time ASC, id DESC
-  `).all();
+  `, []);
 
   res.json(rows);
 });
 
-app.get('/api/admin/players', admin, (req, res) => {
-  res.json(db.prepare('SELECT id,name,email,ff_uid,coins,avatar,created_at FROM players ORDER BY id DESC LIMIT 500').all());
+app.get('/api/admin/players', admin, async (req, res) => {
+  res.json(await queryRows('SELECT id,name,email,ff_uid,coins,avatar,created_at FROM players ORDER BY id DESC LIMIT 500', []));
 });
-app.post('/api/admin/announcements', admin, (req, res) => {
+app.post('/api/admin/announcements', admin, async (req, res) => {
   const title = cleanText(req.body.title, 100);
   const body = cleanText(req.body.body, 2000);
   if (!title || !body) return res.status(400).json({ error: 'Announcement title and message are required.' });
-  const info = db.prepare('INSERT INTO announcements(title,body) VALUES(?,?)').run(title,body);
-  res.json({ message: 'Announcement published.', id: info.lastInsertRowid });
+  const info = await query('INSERT INTO announcements(title,body) VALUES($1,$2) RETURNING id', [title, body]);
+  res.json({ message: 'Announcement published.', id: info.rows[0].id });
 });
 
-app.get('/api/admin/registrations', admin, (req, res) => {
-  const rows = db.prepare(`
+app.get('/api/admin/registrations', admin, async (req, res) => {
+  const rows = await queryRows(`
     SELECT
       r.id,
       r.position,
@@ -742,14 +749,14 @@ app.get('/api/admin/registrations', admin, (req, res) => {
     JOIN players p ON p.id = r.player_id
     JOIN tournaments t ON t.id = r.tournament_id
     ORDER BY r.id DESC
-  `).all();
+  `, []);
 
   res.json(rows);
 });
 
 // CREATE TOURNAMENT
 
-app.post('/api/admin/tournaments', admin, (req, res) => {
+app.post('/api/admin/tournaments', admin, async (req, res) => {
   const name = cleanText(req.body.name, 100);
   const gc = cleanText(req.body.gc, 100);
   const mode = cleanText(req.body.mode || 'Squad', 40);
@@ -787,38 +794,26 @@ app.post('/api/admin/tournaments', admin, (req, res) => {
     });
   }
 
-  const info = db.prepare(`
+  const info = await query(`
     INSERT INTO tournaments(
       name,gc,mode,entry_coins,prize,prize_coins,
       per_kill_coins,max_prize_coins,host_fee_coins,
       match_time,max_players,details,
       registration_open,status
     )
-    VALUES(?,?,?,?,?,?,?,?,?,?,?, ?,1,'upcoming')
-  `).run(
-    name,
-    gc,
-    mode,
-    entry,
-    'SOUL COINS',
-    prizeCoins,
-    perKillCoins,
-    maxPrizeCoins,
-    hostFeeCoins,
-    new Date(matchTime).toISOString(),
-    max,
-    details
-  );
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, $12,1,'upcoming')
+    RETURNING id
+  `, [name, gc, mode, entry, 'SOUL COINS', prizeCoins, perKillCoins, maxPrizeCoins, hostFeeCoins, new Date(matchTime).toISOString(), max, details]);
 
   res.json({
-    id: info.lastInsertRowid,
+    id: info.rows[0].id,
     message: gc === 'BR Full Map' ? `BR match scheduled. Per kill ${perKillCoins} coins; max prize ${maxPrizeCoins} coins.` : `Match scheduled. Each winning player receives ${prizeCoins} coins.`
   });
 });
 
 // CHANGE TOURNAMENT STATUS
 
-app.patch('/api/admin/tournaments/:id/status', admin, (req, res) => {
+app.patch('/api/admin/tournaments/:id/status', admin, async (req, res) => {
   const status = req.body.status;
 
   if (!VALID_STATUSES.has(status)) {
@@ -827,11 +822,11 @@ app.patch('/api/admin/tournaments/:id/status', admin, (req, res) => {
     });
   }
 
-  const info = db.prepare(`
-    UPDATE tournaments SET status = ? WHERE id = ?
-  `).run(status, req.params.id);
+  const info = await query(`
+    UPDATE tournaments SET status = $1 WHERE id = $2
+  `, [status, idParam(req.params.id)]);
 
-  if (!info.changes) {
+  if (!info.rowCount) {
     return res.status(404).json({
       error: 'Tournament not found'
     });
@@ -842,7 +837,7 @@ app.patch('/api/admin/tournaments/:id/status', admin, (req, res) => {
 
 // OPEN / CLOSE REGISTRATION
 
-app.patch('/api/admin/tournaments/:id/registration', admin, (req, res) => {
+app.patch('/api/admin/tournaments/:id/registration', admin, async (req, res) => {
   const open = req.body.open;
 
   if (![true, false, 0, 1].includes(open)) {
@@ -851,13 +846,13 @@ app.patch('/api/admin/tournaments/:id/registration', admin, (req, res) => {
     });
   }
 
-  const info = db.prepare(`
+  const info = await query(`
     UPDATE tournaments
-    SET registration_open = ?
-    WHERE id = ?
-  `).run(open ? 1 : 0, req.params.id);
+    SET registration_open = $1
+    WHERE id = $2
+  `, [open ? 1 : 0, idParam(req.params.id)]);
 
-  if (!info.changes) {
+  if (!info.rowCount) {
     return res.status(404).json({
       error: 'Tournament not found'
     });
@@ -870,7 +865,7 @@ app.patch('/api/admin/tournaments/:id/registration', admin, (req, res) => {
 
 // ORGANIZER ADDS ROOM ID AND PASSWORD
 
-app.patch('/api/admin/tournaments/:id/room', admin, (req, res) => {
+app.patch('/api/admin/tournaments/:id/room', admin, async (req, res) => {
   const roomId = cleanText(String(req.body.room_id || ''), 100);
   const roomPassword = cleanText(
     String(req.body.room_password || ''),
@@ -883,13 +878,13 @@ app.patch('/api/admin/tournaments/:id/room', admin, (req, res) => {
     });
   }
 
-  const info = db.prepare(`
+  const info = await query(`
     UPDATE tournaments
-    SET room_id = ?, room_password = ?
-    WHERE id = ?
-  `).run(roomId, roomPassword, req.params.id);
+    SET room_id = $1, room_password = $2
+    WHERE id = $3
+  `, [roomId, roomPassword, idParam(req.params.id)]);
 
-  if (!info.changes) {
+  if (!info.rowCount) {
     return res.status(404).json({
       error: 'Tournament not found'
     });
@@ -901,7 +896,7 @@ app.patch('/api/admin/tournaments/:id/room', admin, (req, res) => {
 });
 // ORGANIZER AWARDS SOUL COINS
 
-app.post('/api/admin/coins', admin, (req, res) => {
+app.post('/api/admin/coins', admin, async (req, res) => {
   const ff_uid = cleanText(
     String(req.body.ff_uid || ''),
     40
@@ -922,9 +917,9 @@ app.post('/api/admin/coins', admin, (req, res) => {
     });
   }
 
-  const player = db.prepare(`
-    SELECT id,coins FROM players WHERE ff_uid = ?
-  `).get(ff_uid);
+  const player = await queryOne(`
+    SELECT id,coins FROM players WHERE ff_uid = $1
+  `, [ff_uid]);
 
   if (!player) {
     return res.status(404).json({
@@ -932,20 +927,23 @@ app.post('/api/admin/coins', admin, (req, res) => {
     });
   }
 
-  db.transaction(() => {
-    addCoins(player.id, amount, reason);
-  })();
+  const newBalance = await withTransaction(async () => {
+    const lockedPlayer = await queryOne('SELECT coins FROM players WHERE id = $1 FOR UPDATE', [player.id]);
+    if (!lockedPlayer) throw new Error('Player not found');
+    await addCoins(player.id, amount, reason);
+    return Number(lockedPlayer.coins) + amount;
+  });
 
   res.json({
     message: 'SOUL COINS awarded',
     coins_added: amount,
-    new_balance: player.coins + amount
+    new_balance: newBalance
   });
 });
 
 // PUBLISH RESULTS AND REWARD WINNERS
 
-app.post('/api/admin/results', admin, (req, res) => {
+app.post('/api/admin/results', admin, async (req, res) => {
   const tournamentId = Number(req.body.tournament_id);
   const playerName = cleanText(req.body.player_name, 60);
   const playerUid = cleanText(
@@ -974,9 +972,9 @@ app.post('/api/admin/results', admin, (req, res) => {
     });
   }
 
-  const tournament = db.prepare(`
-    SELECT id,name FROM tournaments WHERE id = ?
-  `).get(tournamentId);
+  const tournament = await queryOne(`
+    SELECT id,name FROM tournaments WHERE id = $1
+  `, [tournamentId]);
 
   if (!tournament) {
     return res.status(404).json({
@@ -987,15 +985,15 @@ app.post('/api/admin/results', admin, (req, res) => {
   let player;
 
   if (playerUid) {
-    player = db.prepare(`
-      SELECT id,name,ff_uid FROM players WHERE ff_uid = ?
-    `).get(playerUid);
+    player = await queryOne(`
+      SELECT id,name,ff_uid FROM players WHERE ff_uid = $1
+    `, [playerUid]);
   } else {
-    player = db.prepare(`
+    player = await queryOne(`
       SELECT id,name,ff_uid
       FROM players
-      WHERE name = ? COLLATE NOCASE
-    `).get(playerName);
+      WHERE LOWER(name) = LOWER($1)
+    `, [playerName]);
   }
 
   if (!player) {
@@ -1004,12 +1002,12 @@ app.post('/api/admin/results', admin, (req, res) => {
     });
   }
 
-  const registered = db.prepare(`
+  const registered = await queryOne(`
     SELECT r.id
     FROM registrations r
-    WHERE r.player_id = ?
-    AND r.tournament_id = ?
-  `).get(player.id, tournamentId);
+    WHERE r.player_id = $1
+    AND r.tournament_id = $2
+  `, [player.id, tournamentId]);
 
   if (!registered) {
     return res.status(400).json({
@@ -1018,8 +1016,8 @@ app.post('/api/admin/results', admin, (req, res) => {
   }
 
   try {
-    db.transaction(() => {
-      db.prepare(`
+    await withTransaction(async () => {
+      await query(`
         INSERT INTO results(
           tournament_id,
           player_name,
@@ -1027,23 +1025,17 @@ app.post('/api/admin/results', admin, (req, res) => {
           position,
           reward_coins
         )
-        VALUES(?,?,?,?,?)
-      `).run(
-        tournamentId,
-        player.name,
-        points,
-        position,
-        reward
-      );
+        VALUES($1,$2,$3,$4,$5)
+      `, [tournamentId, player.name, points, position, reward]);
 
       if (reward > 0) {
-        addCoins(
+        await addCoins(
           player.id,
           reward,
           `Tournament reward: ${tournament.name}`
         );
       }
-    })();
+    });
 
     res.json({
       message: 'Result published and reward credited',
@@ -1059,54 +1051,56 @@ app.post('/api/admin/results', admin, (req, res) => {
 });
 
 // ADMIN PLAYER SEARCH AND WALLET ADJUSTMENT (virtual wallet only)
-app.get('/api/admin/player-search', admin, (req, res) => {
+app.get('/api/admin/player-search', admin, async (req, res) => {
   const q = cleanText(String(req.query.q || ''), 160);
   if (!q) return res.json([]);
   const like = `%${q}%`;
-  res.json(db.prepare(`SELECT id,name,email,ff_uid,coins,avatar FROM players
-    WHERE email LIKE ? OR ff_uid LIKE ? OR name LIKE ? OR CAST(id AS TEXT)=?
-    ORDER BY id DESC LIMIT 30`).all(like, like, like, q));
+  res.json(await queryRows(`SELECT id,name,email,ff_uid,coins,avatar FROM players
+    WHERE email ILIKE $1 OR ff_uid ILIKE $2 OR name ILIKE $3 OR CAST(id AS TEXT)=$4
+    ORDER BY id DESC LIMIT 30`, [like, like, like, q]));
 });
 
-app.post('/api/admin/players/:id/coins', admin, (req, res) => {
+app.post('/api/admin/players/:id/coins', admin, async (req, res) => {
   const action = req.body.action;
   const amount = Number(req.body.amount);
   const reason = cleanText(req.body.reason || 'Organizer wallet adjustment', 200);
   if (!['add','remove'].includes(action) || !Number.isInteger(amount) || amount < 1 || amount > 100000) {
     return res.status(400).json({error:'Choose add/remove and enter a valid whole coin amount.'});
   }
-  const player = db.prepare('SELECT id,coins,name FROM players WHERE id=?').get(req.params.id);
+  const player = await queryOne('SELECT id,coins,name FROM players WHERE id=$1', [idParam(req.params.id)]);
   if (!player) return res.status(404).json({error:'Player not found.'});
   try {
-    db.transaction(() => {
-      if (action === 'add') addCoins(player.id, amount, reason);
+    await withTransaction(async () => {
+      if (action === 'add') await addCoins(player.id, amount, reason);
       else {
-        const info = db.prepare('UPDATE players SET coins=coins-? WHERE id=? AND coins>=?').run(amount, player.id, amount);
-        if (!info.changes) throw new Error('Player does not have enough coins.');
-        db.prepare('INSERT INTO coin_history(player_id,amount,reason) VALUES(?,?,?)').run(player.id, -amount, reason);
+        const info = await query('UPDATE players SET coins=coins-$1 WHERE id=$2 AND coins>=$3', [amount, player.id, amount]);
+        if (!info.rowCount) throw new Error('Player does not have enough coins.');
+        await query('INSERT INTO coin_history(player_id,amount,reason) VALUES($1,$2,$3)', [player.id, -amount, reason]);
       }
-    })();
-    const balance = db.prepare('SELECT coins FROM players WHERE id=?').get(player.id).coins;
+    });
+    const balanceRow = await queryOne('SELECT coins FROM players WHERE id=$1', [player.id]);
+    const balance = balanceRow.coins;
     res.json({message:`${amount} coins ${action==='add'?'added to':'removed from'} ${player.name}.`, balance});
   } catch(e) { res.status(400).json({error:e.message}); }
 });
 
 // ADMIN RESULT EDITOR: registered players for a single match
-app.get('/api/admin/tournaments/:id/participants', admin, (req, res) => {
-  const tournament = db.prepare('SELECT * FROM tournaments WHERE id=?').get(req.params.id);
+app.get('/api/admin/tournaments/:id/participants', admin, async (req, res) => {
+  const tournament = await queryOne('SELECT * FROM tournaments WHERE id=$1', [idParam(req.params.id)]);
   if (!tournament) return res.status(404).json({error:'Match not found.'});
-  const players = db.prepare(`SELECT p.id,p.name,p.email,p.ff_uid,p.coins,r.position,r.team_name,m.kills,m.outcome,m.reward_coins
+  const players = await queryRows(`SELECT p.id,p.name,p.email,p.ff_uid,p.coins,r.position,r.team_name,m.kills,m.outcome,m.reward_coins
     FROM registrations r JOIN players p ON p.id=r.player_id
     LEFT JOIN match_results m ON m.player_id=p.id AND m.tournament_id=r.tournament_id
-    WHERE r.tournament_id=? ORDER BY COALESCE(r.position,999),p.name`).all(tournament.id);
-  const submitted = db.prepare('SELECT COUNT(*) AS n FROM match_results WHERE tournament_id=?').get(tournament.id).n > 0;
+    WHERE r.tournament_id=$1 ORDER BY COALESCE(r.position,999),p.name`, [tournament.id]);
+  const submittedCount = await queryOne('SELECT COUNT(*) AS n FROM match_results WHERE tournament_id=$1', [tournament.id]);
+  const submitted = Number(submittedCount.n) > 0;
   res.json({submitted,tournament:{id:tournament.id,name:tournament.name,gc:tournament.gc,entry_coins:tournament.entry_coins,prize_coins:tournament.prize_coins,per_kill_coins:tournament.per_kill_coins,max_prize_coins:tournament.max_prize_coins,host_fee_coins:tournament.host_fee_coins,max_players:tournament.max_players},players});
 });
 
-app.post('/api/admin/tournaments/:id/submit-results', admin, (req, res) => {
-  const tournament = db.prepare('SELECT * FROM tournaments WHERE id=?').get(req.params.id);
+app.post('/api/admin/tournaments/:id/submit-results', admin, async (req, res) => {
+  const tournament = await queryOne('SELECT * FROM tournaments WHERE id=$1', [idParam(req.params.id)]);
   if (!tournament) return res.status(404).json({error:'Match not found.'});
-  const players = db.prepare('SELECT p.id,p.name FROM registrations r JOIN players p ON p.id=r.player_id WHERE r.tournament_id=? ORDER BY p.id').all(tournament.id);
+  const players = await queryRows('SELECT p.id,p.name FROM registrations r JOIN players p ON p.id=r.player_id WHERE r.tournament_id=$1 ORDER BY p.id', [tournament.id]);
   const submitted = Array.isArray(req.body.results) ? req.body.results : [];
   if (!players.length || submitted.length !== players.length) return res.status(400).json({error:'Select a result for every registered player before submitting.'});
   const byId = new Map(submitted.map(x => [Number(x.player_id), x]));
@@ -1146,20 +1140,27 @@ app.post('/api/admin/tournaments/:id/submit-results', admin, (req, res) => {
     rewards = new Map(players.map(p=>[p.id,winners.some(w=>w.id===p.id)?prizeEach:0]));
   }
   try {
-    db.transaction(() => {
-      const existing = db.prepare('SELECT COUNT(*) AS n FROM match_results WHERE tournament_id=?').get(tournament.id).n;
-      if (existing) throw new Error('Results have already been submitted for this match.');
+    await withTransaction(async () => {
+      const lockedTournament = await queryOne('SELECT id FROM tournaments WHERE id = $1 FOR UPDATE', [tournament.id]);
+      if (!lockedTournament) throw new Error('Match not found.');
+      const currentPlayers = await queryRows('SELECT p.id FROM registrations r JOIN players p ON p.id=r.player_id WHERE r.tournament_id=$1 ORDER BY p.id', [tournament.id]);
+      if (currentPlayers.length !== players.length ||
+          currentPlayers.some((player, index) => player.id !== players[index].id)) {
+        throw new Error('Tournament registrations changed. Reload and submit results again.');
+      }
+      const existing = await queryOne('SELECT COUNT(*) AS n FROM match_results WHERE tournament_id=$1', [tournament.id]);
+      if (Number(existing.n)) throw new Error('Results have already been submitted for this match.');
       for (const p of players) {
         const data = byId.get(p.id);
         const kills = isBR ? Number(data.kills) : 0;
         const outcome = isBR ? '' : String(data.outcome);
         const reward = Number(rewards.get(p.id) || 0);
-        db.prepare('INSERT INTO match_results(tournament_id,player_id,kills,outcome,reward_coins) VALUES(?,?,?,?,?)').run(tournament.id,p.id,kills,outcome,reward);
-        db.prepare('INSERT INTO results(tournament_id,player_name,points,position,reward_coins) VALUES(?,?,?,?,?)').run(tournament.id,p.name,isBR?kills:(outcome==='win'?1:0),0,reward);
-        if (reward > 0) addCoins(p.id,reward,`${isBR?'BR kill reward':'Match winner reward'}: ${tournament.name}`);
+        await query('INSERT INTO match_results(tournament_id,player_id,kills,outcome,reward_coins) VALUES($1,$2,$3,$4,$5)', [tournament.id, p.id, kills, outcome, reward]);
+        await query('INSERT INTO results(tournament_id,player_name,points,position,reward_coins) VALUES($1,$2,$3,$4,$5)', [tournament.id, p.name, isBR?kills:(outcome==='win'?1:0), 0, reward]);
+        if (reward > 0) await addCoins(p.id,reward,`${isBR?'BR kill reward':'Match winner reward'}: ${tournament.name}`);
       }
-      db.prepare("UPDATE tournaments SET status='completed' WHERE id=?").run(tournament.id);
-    })();
+      await query("UPDATE tournaments SET status='completed' WHERE id=$1", [tournament.id]);
+    });
     const totalPaid = [...rewards.values()].reduce((a,b)=>a+b,0);
     res.json({message:`Results submitted. ${players.length} players processed; ${totalPaid} virtual SOUL COINS credited.`,total_reward:totalPaid,results:players.map(p=>({player_id:p.id,name:p.name,kills:isBR?Number(byId.get(p.id).kills):null,outcome:isBR?'':byId.get(p.id).outcome,reward_coins:rewards.get(p.id)||0}))});
   } catch(e) { res.status(400).json({error:e.message}); }
@@ -1179,8 +1180,17 @@ app.use((err, req, res, next) => {
 
 const port = Number(process.env.PORT || 3000);
 
-app.listen(port, '0.0.0.0', () => {
-  console.log(
-    'SOULFIRE ESPORTS running on port ' + port
-  );
-});
+initializeDatabase()
+  .then(() => {
+    app.listen(port, '0.0.0.0', () => {
+      console.log(
+        'SOULFIRE ESPORTS running on port ' + port
+      );
+    });
+  })
+  .catch(error => {
+    console.error('PostgreSQL schema initialization failed.', error.code || error.name);
+    pool.end().finally(() => {
+      process.exitCode = 1;
+    });
+  });
